@@ -5,6 +5,7 @@ __pycache__/
 auto_shot.png
 scripts/_fixed_shot.png
 scripts/_ocr_frame.png
+scripts/_ocr_frame.png.ocr.json
 scripts/ocr_state.json
 scripts/stats.json
 scripts/debug/

@@ -82,7 +82,8 @@ class OCREngine:
                 raise RuntimeError("WinRT OCR 无输出")
             with open(out, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            os.remove(out)
+            # 不删除：out 是固定路径，PowerShell 每次覆盖写入。
+            # 逐帧删除会累计触发宿主环境的批量删除保护（一轮 50 次即中断进程）。
         except Exception as e:
             raise RuntimeError("WinRT OCR 失败: %s" % e)
 
