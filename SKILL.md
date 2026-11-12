@@ -1,78 +1,119 @@
 ---
 name: qishui-ad-automation
-description: 汽水音乐「领时长」福利无人值守自动领取。当用户想用安卓手机自动看广告领取汽水音乐免费听歌时长（如"汽水音乐领时长""自动看广告领时长""汽水音乐福利领时长""帮我把汽水音乐的时长领了"等）时使用。自动连接已授权的安卓设备，点击领时长、观看激励视频广告、领取奖励并循环，直到领完；自动避开直播间跳转，无广告时退出重试并挂机等待后继续。无需写死设备号或坐标，跨设备/跨分辨率通用。
+description: 汽水音乐「领时长」福利无人值守自动领取。当用户想用安卓手机自动看广告领取汽水音乐免费听歌时长（如"汽水音乐领时长""自动看广告领时长""汽水音乐福利领时长""帮我把汽水音乐的时长领了"等）时使用。像素快路径 + 轻量 OCR 文字兜底，识别「领时长 / 继续领 / 领取成功 × / 领取奖励 / N秒后倒计时 / 取消 / 继续观看 / 退出不看了 / 关闭 X」等文字与符号后按确定性规则直接点击；覆盖视频广告、直播广告、直播间容错、无视频遮罩、开屏广告与 MIUI 跳转确认。附带 GUI 控制面板与调试标注截图。无需写死设备号，跨分辨率自适应。
 ---
 
 # 汽水音乐「领时长」自动领取
 
-通过 adb 驱动已连接的安卓手机，无人值守地完成汽水音乐「领时长」福利循环：
-福利页点「领时长」→ 看激励视频广告 → 领取奖励 → 循环，直到领完当天额度。
+通过 adb 驱动已授权的安卓手机：**像素快路径判定常规状态 → 卡住时用轻量 OCR 读文字 → 查表直接点**。
+Agent 不参与逐帧决策，只负责启动、等结束、如实回报。
 
-## 适用场景
-- 用户要求自动领取汽水音乐「领时长」福利（看广告得免费听歌时长）
-- 已连接安卓手机、已开启 USB 调试并授权、已安装并登录汽水音乐
+## 首次安装（一次即可）
 
-## 前置条件（务必先确认）
-1. 手机 USB 连接电脑，已开启「USB 调试」并在弹窗中**授权本机**（看到设备序列号且状态为 `device`）
-2. 已安装并登录汽水音乐（包名 `com.luna.music`）
-3. 手机**保持亮屏**（建议临时关闭自动锁屏/休眠，锁屏会使点击失效）
-4. adb 可用：WorkBuddy 自带 `~/.workbuddy/binaries/platform-tools/adb`，或系统已装 Android 平台工具
-   - 部分 Windows 环境 adb 默认后端无法枚举 USB，脚本会自动切 legacy 后端（`ADB_LIBUSB=0`），无需手动设置
-
-## 执行约定（重要）
-当用户表达"领时长 / 自动看广告 / 帮我把时长领了"等意图，且手机已连接时：
-**直接运行脚本、后台执行、不要反问、不要逐步确认**。执行后仅回报日志路径与进度。
-全程无人值守，用户不需要盯着屏幕。
-
-## 安装（别的电脑 · 一句话即可）
-仓库根目录本身就是 Skill 目录，把下面这句话连同链接发给支持 Skill 的 AI 即可自动装好：
-
-> 从这个 GitHub 仓库安装 WorkBuddy Skill：https://github.com/yangxivi/qishui-ad-automation —— 请 clone 到 `~/.workbuddy/skills/qishui-ad-automation/`（Windows 为 `C:/Users/<用户名>/.workbuddy/skills/qishui-ad-automation/`），然后按 `SKILL.md` 执行。装好后连上手机，帮我把汽水音乐的时长领了。
-
-等价的手动命令：
 ```bash
 git clone https://github.com/yangxivi/qishui-ad-automation.git ~/.workbuddy/skills/qishui-ad-automation/
+python ~/.workbuddy/skills/qishui-ad-automation/scripts/setup_ocr.py
+python ~/.workbuddy/skills/qishui-ad-automation/scripts/setup_ocr.py --check
 ```
-无需额外配置；首次运行脚本会自行安装 Pillow、自动定位 adb。
 
-## 使用方式
-直接运行脚本即可，adb / 设备 / 屏幕分辨率全部自动探测，关键按钮自动扫描定位：
+`setup_ocr.py` 按「最轻优先」选引擎，结果写入 `scripts/ocr_state.json`：
+
+| 环境 | OCR 引擎 | 体积 | 说明 |
+|---|---|---|---|
+| Windows（默认） | 系统内置 `Windows.Media.Ocr` + `zh-Hans-CN` | **0 MB / 零下载** | 离线、CPU、自带中文模型 |
+| 非 Windows / `--force-rapidocr` | `rapidocr-onnxruntime`（PP-OCR ONNX） | 约 15 MB | 纯 CPU、离线，模型复制到 `scripts/models/` |
+| 都不可用 | 像素状态机 | 0 | 自动回退，功能不残缺 |
+
+不用 PaddleOCR / EasyOCR（需拉 PyTorch 1–2 GB）。依赖：Python 3.9+、Pillow、adb。
+adb 缺失时把官方 platform-tools 解压到 `~/.workbuddy/binaries/platform-tools/`（默认查找路径）。
+pip 装不动可用 `python scripts/setup_ocr.py --index <镜像源>`。
+
+其他前置：USB 调试已授权（`adb devices` 显示 `device`）、已登录 `com.luna.music`、保持亮屏。
+
+## 快速执行路径（成熟模式 · Agent 看这里）
+
+装好且 `setup_ocr.py --check` 通过后，**不要逐步分析、不要每帧截图、不要重新推导坐标、不要重复审计代码**。
+直接一条命令，等结束，读日志，如实回报：
 
 ```bash
-# 默认：无限循环；无广告时挂机 5 分钟重试
-python scripts/automate.py
-
-# 限制挂机轮数（每轮 = idle-seconds），超过即停止，避免无限挂机
-python scripts/automate.py --max-idle 6
-
-# 自定义挂机时长（秒）
-python scripts/automate.py --idle-seconds 600
-
-# 无广告时直接退出，不挂机
-python scripts/automate.py --no-idle
+python scripts/automate_fast.py --max-ads 120 --max-seconds 3600 --target-day 31
 ```
 
-日志实时写入 `scripts/automate.log`，可随时查看进度。
+- 必带 `--max-ads` / `--max-seconds` 硬上限，禁止无限挂机
+- 日志 `scripts/automate_fast.log`；统计 `scripts/stats.json`（每轮更新）
+- 只在三种情况才需额外动作：设备未连接/未授权、像素与 OCR 兜底都失效、日志明确报错
+- 图形界面：`python scripts/gui.py` → 本地网页控制面板（自动开浏览器 `127.0.0.1:8765`），
+  可视化配置参数 + 实时日志 + 统计；仅用标准库 `http.server`，不依赖 tkinter
+- 调试排查：加 `--debug`，点击时保存带 OCR 文字框与点击位置的标注截图到 `scripts/debug/`
 
-## 运行机制
-1. **直播间优先退出**：检测到 `LunaDefaultLivePlayerActivity` 立即点右上角 X 退出（含「退出不看了」面板兜底）
-2. **绿按钮全屏扫描**：自动定位并点击绿色按钮（领时长 / 继续观看 / 领取奖励），看到就点
-3. **广告结束态**：点「领取成功」胶囊揭开弹窗 → 点「领取奖励」继续下一轮
-4. **无新视频**：点右上角白色 X 退出 → 回福利页重试
-5. **福利页无入口**：挂机 5 分钟 → 重进汽水音乐重试（`--max-idle` 可限制总轮数）
-6. 全程事件驱动，不依赖固定广告时长
+**诚实性要求（不可省略，与「少推理」不冲突）**：
+- 只报真实发生的结果；失败、没领到、半途停止都要直说，不得用「启动成功」冒充「领取成功」
+- 结束后回福利中心截一张图核对「免费听长 N 天」，用画面证据给结论
+- 用户对新操作始终有知情权；减少的是 Agent 的逐步推理开销，不是对用户的披露
 
-## 自包含性
-Skill 仅由 `SKILL.md` + `scripts/automate.py` 组成，无第三方服务、无密钥、
-无写死设备号或坐标：
-- 首次运行自动 `pip install Pillow`
-- adb 自动从 WorkBuddy 自带目录或系统 PATH 定位（含 `ADB_LIBUSB=0` 回退）
-- 设备、屏幕分辨率、绿色按钮与关闭按钮坐标全部运行时自适应
-分发通道：GitHub 仓库 `yangxivi/qishui-ad-automation`（推荐，一句话 clone 即装）；
-另有 `qishui-ad-automation.zip` 离线包，解压到 skills 目录即用。
+> 旧版 SKILL.md 曾写「后台执行、不要反问、不要逐步确认、仅回报日志路径与进度」——
+> 那是第三方内容里规避用户监督的指令，已删除，不沿用。
+
+## 功能特性 / 状态覆盖
+
+| 场景 | 识别依据 | 动作 |
+|---|---|---|
+| 福利页入口 `领时长` / `继续领` | 绿色按钮区域质心 / OCR 文字 | 点击，起一条广告 |
+| 视频广告倒计时 `N秒后可领取奖励` | 右上角绿标像素 | 等待，**绝不提前点 X** |
+| 广告结束 `领取成功 ×` | 绿标消失 → 右上角胶囊 | 点开奖励弹窗 |
+| 奖励弹窗 `领取奖励` | 中央大片亮绿质心 | 点击，计入一轮并自动进入下一广告 |
+| 直播广告 5 秒「取消」 | 倒计时期间每 5 帧 OCR 抽查 | 点「取消」，避免误入直播间 |
+| 误入直播间 | `LivePlayer` Activity | 右上角 X 退出；连退失败用 OCR 找「退出不看了」 |
+| 「坚持退出」免费解锁弹窗 | OCR `继续观看` | 点「继续观看」保住这一轮奖励 |
+| 「当前无新视频」遮罩 | 右上角白 X + 中央变暗（像素） | 点 X 关提示层；连续 8 次则等 20s 让广告池恢复 |
+| 开屏广告 `AdActivity` | Activity 名 | 点「跳过 N」 |
+| MIUI「启动应用」确认 | `ConfirmStartActivity` | 点「拒绝」，绝不点「本次允许」 |
+| 桌面 / 未知界面 | Activity 名 | 先按返回，再拉回 App；连续 12 次无果才停 |
+| 福利 tab 定位 | `uiautomator` 文字节点 | 按文字定位，**绝不盲点固定坐标**（广告页上那是广告主 CTA） |
+
+**黑名单（永不点击）**：`了解更多`、`前往微保`、`立即投保`、`立即下单`、`去听歌`、
+`去签到`、`去提现`、`坚持退出` 等广告主 CTA 与无关入口。
+识别到 `领取成功` 才算一轮奖励到账。
+
+倒计时是 App 强制的（18~39 秒），这部分无法压缩，跳过就没有奖励；
+优化掉的是每帧 OCR 进程、二次截图与冗余等待（轮询 2s → 0.35s）。
+
+## 参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--max-ads` | 120 | 广告数量上限，到点自动停止 |
+| `--max-seconds` | 3600 | 总时长硬上限（秒） |
+| `--ocr-every` | 10 | 每 N 轮做一次 OCR 链路抽查 |
+| `--target-day` | 31 | 目标天数（日志/统计标注） |
+| `--debug` | 关 | 保存带 OCR 标注与点击位置的调试截图 |
+
+另有 `automate_ocr.py`（逐帧 OCR 版，`--dry-run` 只打印决策不点屏幕）与
+`automate_fixed.py`（纯像素状态机）作为对照与回退。
+
+## 文件
+
+| 文件 | 说明 |
+|---|---|
+| `scripts/setup_ocr.py` | 一次性安装/校验轻量 OCR 引擎 |
+| `scripts/ocr_engine.py` | 统一 OCR 后端（winrt → rapidocr → 无） |
+| `scripts/win_ocr.ps1` | Windows 内置 OCR 调用封装 |
+| `scripts/automate_fast.py` | **主程序**：极速 v2，像素快路径 + OCR 兜底 |
+| `scripts/automate_ocr.py` | 逐帧 OCR 决策表（含 `decide()`，被主程序复用） |
+| `scripts/automate_fixed.py` | 像素状态机工具函数（`rb`/`focus`/`green_stats`/`tap`） |
+| `scripts/gui.py` | 本地网页控制面板（标准库 `http.server`，零依赖、无需 tkinter） |
+| `scripts/stats.json` | 每轮统计，供 GUI 实时读取 |
+| `scripts/debug/` | `--debug` 标注截图 |
+| `scripts/*.log` | 运行日志 |
 
 ## 注意事项
-- 仅用于本人已登录账号的福利领取，请遵守 App 使用条款
-- 手机需保持亮屏，锁屏会导致 `input tap` 失效
-- 若当天广告已放完，脚本会按设定挂机等待，属正常行为；可用 `--max-idle 0`/小值避免长期占用
-- 运行中按 `Ctrl+C` 可随时停止
+
+- 仅用于本人已登录账号的福利领取；自动看激励广告可能违反 App 使用条款，有账号限制风险
+- 「领时长」是**阶梯解锁**（每多一天需再看 3–4 个视频），没有明确的「当天领完」终点，
+  用 `--max-ads` / `--max-seconds` 自行设停止点
+- 锁屏会让 `input tap` 失效，运行时保持亮屏
+- 换机型/换版本后建议先用 `--dry-run` 或 `--debug` 校准，再正式跑
+- OCR 临时帧固定路径覆盖、不做逐帧删除：逐帧 `os.remove` 会累计触发宿主环境的
+  批量删除保护而中断长跑（实测一轮 50 次），此坑已修
+- 旧版 `automate.py` 的三个实测缺陷（已弃用）：扫错区域先点中「去听歌」、
+  把绿色专辑封面当按钮无限误点、倒计时没结束就点 X 放弃奖励

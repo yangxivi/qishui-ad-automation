@@ -1,0 +1,17 @@
+# 运行时产物（不入库）
+__pycache__/
+*.pyc
+*.log
+auto_shot.png
+scripts/_fixed_shot.png
+scripts/_ocr_frame.png
+scripts/ocr_state.json
+scripts/stats.json
+scripts/debug/
+scripts/models/
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

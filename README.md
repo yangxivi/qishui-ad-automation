@@ -1,130 +1,108 @@
-# 汽水音乐「领时长」自动领取
+# 汽水音乐「领时长」Skill
 
-**WorkBuddy Skill · 开箱即用**
+连上安卓手机，**像素快路径 + 轻量 OCR 文字兜底**，识别到关键词/特征就直接点，
+无人值守完成「领时长 → 看激励视频 → 领取奖励 → 下一轮」循环。
+Agent 不参与逐帧决策，只负责启动、等结束、如实回报。
 
-连上手机，说一句「领时长」，剩下的全自动 —— 看广告、领奖励、循环到领完。
-
-无需写死设备号、坐标或 adb 路径，跨设备、跨分辨率通用；自动避开直播间跳转，没广告时退出重试并挂机等待后继续。
-
-公开仓库：**https://github.com/yangxivi/qishui-ad-automation**
-
----
-
-## ⭐ 最省事：一句话发给 AI 自动装
-
-把下面这句话连同 GitHub 链接发给支持 Skill 的 AI，它会自动 clone 装好，**不用解压、不用配置**：
+## 一句话安装
 
 ```
-从这个 GitHub 仓库安装 WorkBuddy Skill：https://github.com/yangxivi/qishui-ad-automation
-请 clone 到 ~/.workbuddy/skills/qishui-ad-automation/（Windows 为 C:/Users/<用户名>/.workbuddy/skills/qishui-ad-automation/），然后按 SKILL.md 执行。装好后连上手机，帮我把汽水音乐的时长领了。
+从这个 GitHub 仓库安装 WorkBuddy Skill：https://github.com/yangxivi/qishui-ad-automation —— 请 clone 到 ~/.workbuddy/skills/qishui-ad-automation/（Windows 为 C:/Users/<用户名>/.workbuddy/skills/qishui-ad-automation/），运行 scripts/setup_ocr.py，然后按 SKILL.md 执行。
 ```
 
-> 仓库根目录本身就是 Skill 目录（`SKILL.md` + `README.md` + `scripts/automate.py`），clone 完即被 WorkBuddy 自动识别加载。
-
----
-
-## 下载 Skill 安装包
-
-`qishui-ad-automation.zip` · 约 10 KB · 含 `SKILL.md` + `README.md` + 自动化脚本。
-
-- 在线下载页（点「下载安装包」）：https://qishui-duration-skill.app.workbuddy.host/?sharecode=DPDU6UMDWK
-- 或直接取仓库压缩包：https://github.com/yangxivi/qishui-ad-automation/archive/refs/heads/main.zip （解压后把 `qishui-ad-automation-main/` 改名为 `qishui-ad-automation/`）
-
----
-
-## 三步装好
-
-1. **解压**下载得到的 zip，得到 `qishui-ad-automation/` 文件夹
-   —— 里面是 `SKILL.md` 和 `scripts/automate.py`，无需安装任何依赖。
-2. **放到 skills 目录**
-   - Windows：`C:/Users/你的用户名/.workbuddy/skills/`
-   - macOS / Linux：`~/.workbuddy/skills/`
-
-   WorkBuddy 会自动识别并加载这个 Skill。
-3. **手机连上电脑，打开汽水音乐**，然后直接说「帮我把汽水音乐的时长领了」
-   —— Skill 会自动接管，全程不用盯着屏幕。
-
-### 等价的手动 clone 命令
+手动：
 
 ```bash
 git clone https://github.com/yangxivi/qishui-ad-automation.git ~/.workbuddy/skills/qishui-ad-automation/
+python ~/.workbuddy/skills/qishui-ad-automation/scripts/setup_ocr.py
+python ~/.workbuddy/skills/qishui-ad-automation/scripts/setup_ocr.py --check
 ```
 
-Windows：
+## 轻量 OCR 引擎
 
-```bat
-git clone https://github.com/yangxivi/qishui-ad-automation.git "%USERPROFILE%\.workbuddy\skills\qishui-ad-automation"
-```
+安装脚本按「最轻优先」自动选型，不改系统、不需管理员权限：
 
----
+- **Windows（默认）**：系统内置 `Windows.Media.Ocr` + `zh-Hans-CN` 中文模型，
+  **零下载、零安装、离线、0 MB 额外体积**。
+- **非 Windows / `--force-rapidocr`**：`rapidocr-onnxruntime`（PP-OCR ONNX，
+  纯 CPU、约 15 MB 模型），模型复制到 `scripts/models/`，Skill 自包含。
+- **都不可用**：自动回退像素状态机，功能不残缺。
 
-## 也可以直接跑脚本
+不用 PaddleOCR / EasyOCR——需拉 PyTorch（1–2 GB）并联网下模型，不叫轻量。
 
-不想等 AI 调用？进入 `scripts/` 目录直接运行：
+## 前置条件
+
+1. 手机 USB 连电脑，开启「USB 调试」并授权（`adb devices` 状态为 `device`）
+2. 已安装并登录汽水音乐（`com.luna.music`）
+3. 手机保持亮屏，建议临时关闭自动锁屏
+4. Python 3.9+ 与 Pillow；adb 缺失时把官方 platform-tools 解压到
+   `~/.workbuddy/binaries/platform-tools/`
+
+## 功能特性
+
+- 自动点击「领时长 / 继续领」入口按钮，打开视频或直播广告
+- 视频广告：等待倒计时结束 → 自动关闭 → 点击「领取奖励」→ 自动进入下一广告
+- 直播广告：5 秒倒计时内自动点击「取消」，避免误入直播间
+- 直播间容错：万一进入直播间，自动定位右上角 X 退出，并处理「退出不看了」推荐弹窗
+- 自动处理「坚持退出」免费解锁弹窗（点击「继续观看 / 领取奖励」继续）
+- 额外容错：「当前无新视频」遮罩、开屏广告「跳过」、MIUI「启动应用」确认（点拒绝）、
+  桌面/未知界面自动拉回 App
+- 广告主 CTA 全部进黑名单，永不误点
+- 可设置广告数量上限与时长上限，到达后自动停止
+- 内置 GUI 控制面板（本地网页版，零第三方依赖、无需 tkinter）：可视化配置所有参数 + 实时日志 + 统计
+- 调试模式：保存带 OCR 标注和点击位置的截图，便于排查
+
+## 运行
 
 ```bash
-# 默认：无限循环，没广告时挂机 5 分钟后重试
-python automate.py
-
-# 最多挂机 6 轮后自动停止
-python automate.py --max-idle 6
-
-# 自定义挂机时长（秒）
-python automate.py --idle-seconds 600
-
-# 没广告就直接退出，不挂机
-python automate.py --no-idle
+python scripts/automate_fast.py --max-ads 120 --max-seconds 3600 --target-day 31  # 主程序（推荐）
+python scripts/automate_fast.py --max-ads 5 --debug                               # 调试标注截图
+python scripts/gui.py                                                             # 本地网页控制面板，自动开浏览器 127.0.0.1:8765
+python scripts/automate_ocr.py --max-ads 5 --dry-run                              # 只打印决策不点屏幕
+python scripts/automate_fixed.py --max-ads 5 --max-seconds 480                    # 纯像素状态机（对照/回退）
 ```
 
-从仓库根目录运行则写成 `python scripts/automate.py`（参数相同）。
+日志 `scripts/automate_fast.log`，统计 `scripts/stats.json`，调试截图 `scripts/debug/`。
+**务必带 `--max-ads` / `--max-seconds`**，别用无限挂机。
 
-进度实时写入 `scripts/automate.log`；按 **Ctrl+C** 随时停止。首次运行会自动 `pip install Pillow`、自动定位 adb。
+## 判定表（确定性查表，零逐步推理）
 
----
+| 识别到 | 动作 |
+|---|---|
+| `N秒后可领取奖励 ×` | 等待，倒计时中不点 X |
+| `取消` | 点，避开直播间 |
+| `继续观看` / `退出不看了` | 点，处理退出类弹窗 |
+| `领取奖励` | 点它，计入一轮 |
+| `领取成功 ×` | 点右上胶囊，揭开弹窗 |
+| `领时长` / `继续领` | 点它，起一条广告 |
+| `当前无新视频` | 关提示层后重试 |
+| `×` / `关闭`（弹窗上下文） | 点关闭；右上角广告 X 除外 |
+| 无命中 | 回退像素状态机 |
 
-## 内置能力
+倒计时是 App 强制的（18~39 秒），跳过就没有奖励，无法压缩；
+优化掉的是逐帧 OCR 进程、二次截图与冗余等待（轮询 2s → 0.35s）。
 
-| | 能力 | 说明 |
-| --- | --- | --- |
-| ✓ | **换电脑直接用** | 不写死设备号、坐标、adb 路径；分辨率与按钮位置自动探测 |
-| ✓ | **看到按钮就点** | 自动扫描并点击绿色按钮：领时长 / 继续观看 / 领取奖励 |
-| ✓ | **自动避开直播间** | 一旦跳转直播间，第一时间点右上角 X 退出，不耽误领时长 |
-| ✓ | **没广告会等待** | 「当前无新视频」时退出重试；仍没有就挂机 5 分钟后再试 |
-| ✓ | **时长不固定也不怕** | 纯事件驱动，不依赖固定广告秒数，长短视频都能跑 |
-| ✓ | **领完自动停** | 福利页再无可领入口时判定完成，不会无限空转 |
+## 实测记录（2026-11-12，Redmi K70E / 1220×2712）
 
-### 运行机制
+- Windows 内置 OCR 在真实画面上稳定识别 `领时长`、`领取成功×`、`领取奖励`、
+  `39秒后可领取奖励×`、`坚持退出`、`前往微保`，坐标误差 ≤ 5 px。
+- OCR 决策表离线验证 10 类关键词全部映射到正确动作，广告主 CTA 被正确忽略。
+- 极速 v2 实机连续领取，自动处理了「直播间误入」「当前无新视频」「MIUI 跳转确认」等异常，
+  无误点、无死循环。
+- 福利中心「免费听长」由 4 天逐档提升到 15 天（截图核对），每多一天需再看 2–4 个视频。
+- **长跑踩坑**：OCR 临时帧最初每帧 `os.remove`，累计删除触发宿主环境的批量删除保护
+  （一轮 50 次即强制中断进程，已领 27 轮后被杀）。现改为固定路径覆盖写入、不再删除，
+  文件由 `.gitignore` 忽略。
 
-1. **直播间优先退出**：检测到 `LunaDefaultLivePlayerActivity` 立即点右上角 X 退出（含「退出不看了」面板兜底）
-2. **绿按钮全屏扫描**：自动定位并点击绿色按钮（领时长 / 继续观看 / 领取奖励），看到就点
-3. **广告结束态**：点「领取成功 ✕」胶囊揭开弹窗 → 点「领取奖励」继续下一轮
-4. **无新视频**：点右上角白色 X 退出 → 回福利页重试
-5. **福利页无入口**：挂机 5 分钟 → 重进汽水音乐重试（`--max-idle` 可限制总轮数）
-6. 全程事件驱动，不依赖固定广告时长
+## 两点如实说明
 
----
-
-## 使用前请确认
-
-- 手机已用**数据线**连接电脑（不是只充电的线），并在弹窗中点了「允许 USB 调试」
-- 已安装并登录汽水音乐（包名 `com.luna.music`）
-- 手机保持**亮屏**，建议临时关闭自动锁屏 —— 锁屏会让模拟点击失效
-- 电脑上有 adb：WorkBuddy 自带，或系统已装 Android 平台工具（脚本会自动找）
-
-> ⚠️ 部分 Windows 环境 adb 默认后端无法枚举 USB，脚本会自动切 legacy 后端（`ADB_LIBUSB=0`），无需手动设置。
-
-> 仅供本人账号的福利领取使用，请遵守汽水音乐的用户条款。若当天广告已放完，脚本按设定挂机等待属正常行为（可用 `--max-idle` 设小值避免长期占用）。
-
----
+- 「领时长」是**阶梯解锁**：每多一天需要再看 3–4 个视频，没有「当天领完」的硬终点，
+  请用 `--max-ads` / `--max-seconds` 设停止点。
+- 自动看激励广告可能违反汽水音乐使用条款，存在账号限制风险；仅建议用于本人账号。
 
 ## 文件
 
-| 文件 | 说明 |
-| --- | --- |
-| `SKILL.md` | Skill 描述与执行约定（WorkBuddy 读取） |
-| `README.md` | 本说明（安装、运行、能力、注意事项） |
-| `scripts/automate.py` | 自动化主程序，自包含，无第三方服务与密钥 |
-
----
-
-**曦微 · WorkBuddy Skill　|　连上手机，全程自动领取，不用管**
+`SKILL.md` · `scripts/setup_ocr.py` · `scripts/ocr_engine.py` · `scripts/win_ocr.ps1` ·
+`scripts/automate_fast.py`（主程序）· `scripts/automate_ocr.py`（OCR 决策表）·
+`scripts/automate_fixed.py`（像素工具/回退）· `scripts/gui.py`（本地网页面板）·
+`scripts/models/`（可选 ONNX 模型）· `scripts/stats.json` · `scripts/debug/`
