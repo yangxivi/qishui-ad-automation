@@ -345,6 +345,9 @@ def main():
     novideo_cnt = 0
     wait_frames = 0
     last_log_t = t0
+    last_gain_t = t0        # 上次真正领到奖励的时刻
+    live_total = 0          # 累计直播间次数（成功领取时清零）
+    novideo_total = 0       # 累计「无新视频」次数（成功领取时清零）
 
     while time.time() - t0 < args.max_seconds:
         if ads >= args.max_ads:
@@ -355,15 +358,19 @@ def main():
 
         # --- 直播间：右上角 X 退出；连续退不掉就交给 OCR 找「退出不看了」
         if "LivePlayer" in act:
-            log("[live] 直播间 -> X")
+            live_total += 1
+            log("[live] 直播间 -> X (累计 %d)" % live_total)
             im_live = shot_fast()
             if other_cnt >= 2 and smart_recover(im_live, "直播间兜底"):
                 pass
             else:
                 hit(im_live, CTX["LIVE_X"], "直播间 X")
             other_cnt += 1
-            if other_cnt > 10:
-                log("==== 直播间连续退出失败，停止 ====")
+            # 广告池空时 SDK 会反复把用户导流进直播间，逐次点 X 只会无限循环；
+            # 累计多次且长时间没有新奖励，判定广告池耗尽，主动停机。
+            if other_cnt > 10 or (live_total >= 12 and time.time() - last_gain_t > 120):
+                log("==== 广告池疑似耗尽（反复进直播间、%ds 无新奖励），停止 ===="
+                    % int(time.time() - last_gain_t))
                 break
             time.sleep(0.5)
             continue
@@ -415,6 +422,9 @@ def main():
             no_progress = 0
             novideo_cnt = 0
             wait_frames = 0
+            last_gain_t = time.time()
+            live_total = 0
+            novideo_total = 0
             log("==== 第 %d 轮已领取 (%ds) ====" % (ads, int(time.time() - t0)))
             write_stats(ads, True, "第%d轮已领取" % ads)
             if args.ocr_every and ads % args.ocr_every == 0:
@@ -430,10 +440,16 @@ def main():
             ov_white, ov_bright = overlay_stats(im)
             if ov_white > 130 and ov_bright < 90:
                 novideo_cnt += 1
+                novideo_total += 1
                 log("[ad] 「当前无新视频」提示层 -> 关闭 (%d)" % novideo_cnt)
                 hit(im, CTX["NO_VIDEO_X"], "关闭无视频提示")
                 capsule_streak = 0
                 no_progress = 0
+                # 连续无视频且 2 分钟没有任何新奖励 -> 广告池耗尽，停止空转
+                if novideo_total >= 10 and time.time() - last_gain_t > 120:
+                    log("==== 广告池耗尽（连续无视频、%ds 无新奖励），停止 ===="
+                        % int(time.time() - last_gain_t))
+                    break
                 time.sleep(0.6 if novideo_cnt < 8 else 20.0)
                 if novideo_cnt >= 8:
                     novideo_cnt = 0
