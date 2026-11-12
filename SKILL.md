@@ -30,6 +30,18 @@ pip 装不动可用 `python scripts/setup_ocr.py --index <镜像源>`。
 
 其他前置：USB 调试已授权（`adb devices` 显示 `device`）、已登录 `com.luna.music`、保持亮屏。
 
+### 小米 / Redmi（MIUI / HyperOS）必开「USB 调试（安全设置）」
+`adb shell input tap` 注入屏幕点击需要 `INJECT_EVENTS` 权限。**仅开普通「USB 调试」不够**——
+MIUI 开发者选项里另有一项独立的「USB 调试（安全设置）」（带"安全设置"四个字，与普通 USB 调试是两回事）。
+不开这一项，`input tap` 会直接抛
+`SecurityException: Injecting input events requires the INJECT_EVENTS permission`，脚本所有点击都会失败。
+开启要点（缺一不可）：
+1. 设置 → 更多设置 → 开发者选项 → 打开**「USB 调试（安全设置）」**。
+2. 该项若**灰色不可点**：需先登录小米账号、插入 SIM 卡并联网，MIUI 校验通过后才放你开。
+3. 打开后**拔掉 USB 线重插一次**——MIUI 常在 USB 连接时授予该权限，连接中途开启可能不生效。
+4. 重插后手机若再弹「允许 USB 调试」电脑指纹确认，勾选「一律允许」。
+验证：`adb shell input tap 100 100` 不再报错即表示权限已通，再启动脚本。
+
 ## 快速执行路径（成熟模式 · Agent 看这里）
 
 装好且 `setup_ocr.py --check` 通过后，**不要逐步分析、不要每帧截图、不要重新推导坐标、不要重复审计代码**。

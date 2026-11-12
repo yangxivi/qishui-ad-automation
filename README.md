@@ -37,6 +37,11 @@ python ~/.workbuddy/skills/qishui-ad-automation/scripts/setup_ocr.py --check
 3. 手机保持亮屏，建议临时关闭自动锁屏
 4. Python 3.9+ 与 Pillow；adb 缺失时把官方 platform-tools 解压到
    `~/.workbuddy/binaries/platform-tools/`
+5. **小米 / Redmi（MIUI / HyperOS）额外必开「USB 调试（安全设置）」**：仅开普通 USB 调试不够，
+   `adb shell input tap` 注入点击需要 `INJECT_EVENTS` 权限，而这一项藏在开发者选项里、与「USB 调试」
+   是两项独立开关。不开它，`input tap` 会直接抛 `SecurityException: INJECT_EVENTS permission`。
+   该开关若为灰色需先登录小米账号 + 插 SIM 卡 + 联网；打开后**拔掉 USB 线重插一次**才生效。
+   验证：`adb shell input tap 100 100` 不再报错即通。
 
 ## 功能特性
 
