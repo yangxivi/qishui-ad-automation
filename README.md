@@ -25,7 +25,7 @@
 
 ## 下载 Skill 安装包
 
-`qishui-ad-automation.zip` · 约 9 KB · 含 `SKILL.md` + `README.md` + 自动化脚本。
+`qishui-ad-automation.zip` · 约 10 KB · 含 `SKILL.md` + `README.md` + 自动化脚本。
 
 - 在线下载页（点「下载安装包」）：https://qishui-duration-skill.app.workbuddy.host/?sharecode=DPDU6UMDWK
 - 或直接取仓库压缩包：https://github.com/yangxivi/qishui-ad-automation/archive/refs/heads/main.zip （解压后把 `qishui-ad-automation-main/` 改名为 `qishui-ad-automation/`）
