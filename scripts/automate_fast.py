@@ -502,18 +502,19 @@ def main():
                 time.sleep(0.4)
                 continue
             no_progress += 1
+            # 兜底必须先于 tab：否则 UI 层级里只要读得到「福利」就一直点 tab，
+            # 遮罩弹窗（如音量提示）永远轮不到 OCR 处理。
+            if no_progress >= 3:
+                if smart_recover(im, "主页兜底"):
+                    no_progress = 0
+                    time.sleep(0.5)
+                    continue
             xml = ui_dump()
             tab = text_pos(xml, "福利")
             if tab:
                 hit(im, tab, "福利 tab(文字定位)")
                 time.sleep(0.8)
                 continue
-            if no_progress >= 3:
-                # 可能是「继续领」入口、天数弹窗或其它文字状态
-                if smart_recover(im, "主页兜底"):
-                    no_progress = 0
-                    time.sleep(0.5)
-                    continue
             if no_progress >= 10:
                 log("==== 判定当天已无广告或页面异常，停止 ====")
                 break

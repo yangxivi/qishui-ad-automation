@@ -95,7 +95,16 @@ def decide(items, W, H):
 
     has_popup = any(("再看" in t) or ("提前" in t) or RE_DAY.search(t) for _, t, _ in usable)
 
-    # 0) 倒计时必须先判：「39秒后可领取奖励×」里含有「领取奖励」，否则会误点
+    # 0) 系统「未检测到音乐音量变化」弹窗：点「知道了」，绝不点「去设置」
+    #    该弹窗会遮住「领时长」按钮，必须最先处理，否则主页会被误判为无入口
+    for pos, txt, _ in usable:
+        if "知道了" in txt:
+            return "dismiss", pos, "知道了(关音量提示)"
+    for pos, txt, _ in usable:
+        if "音量变化" in txt or "未检测到音乐" in txt or "音量单独调节" in txt:
+            return "dismiss", (int(W * 0.57), int(H * 0.558)), "音量提示(固定坐标)"
+
+    # 1) 倒计时必须先判：「39秒后可领取奖励×」里含有「领取奖励」，否则会误点
     for pos, txt, _ in usable:
         if RE_COOLDOWN.search(txt) or "后可领取" in txt:
             return "wait", None, "倒计时中"

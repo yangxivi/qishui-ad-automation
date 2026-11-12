@@ -69,6 +69,7 @@ python scripts/automate_fast.py --max-ads 120 --max-seconds 3600 --target-day 31
 | 直播间反复推流 | 累计次数 + 距上次领奖时长 | 累计 ≥12 次且 2 分钟无新奖励即停机，避免无限循环 |
 | 开屏广告 `AdActivity` | Activity 名 | 点「跳过 N」 |
 | MIUI「启动应用」确认 | `ConfirmStartActivity` | 点「拒绝」，绝不点「本次允许」 |
+| 系统「未检测到音乐音量变化」弹窗 | OCR `知道了` / `音量变化`（最高优先级） | 点「知道了」关掉遮罩，**绝不点「去设置」**；该弹窗会盖住「领时长」按钮 |
 | 桌面 / 未知界面 | Activity 名 | 先按返回，再拉回 App；连续 12 次无果才停 |
 | 福利 tab 定位 | `uiautomator` 文字节点 | 按文字定位，**绝不盲点固定坐标**（广告页上那是广告主 CTA） |
 
