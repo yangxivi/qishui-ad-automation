@@ -180,6 +180,70 @@ def probe_items(im, width=960):
     return ocr_items(im, width)
 
 
+# ---------------------------------------------------------------- 防死循环护栏
+MIN_REWARD_GAP = 12.0       # 真实一轮必经 18~39s 倒计时；短于此必是同一弹窗重复点击
+LIVE_STREAK_LIMIT = 12      # 连续进直播间上限
+LING_TAP_LIMIT = 5          # 连点「领时长」上限：超过即判定广告池耗尽
+LIVE_EXIT_WORDS = ("退出不看了", "不看了", "退出直播", "确认退出", "坚持退出直播间")
+
+
+def ling_tap_action(taps):
+    """「领时长」连点升级决策：tap -> 文字兜底 -> 停机。
+
+    广告池耗尽时按钮仍是绿色、点击只弹一个瞬时 toast，页面不变。
+    旧版每次点击都把 no_progress 清零，连点保护永远不触发，于是无限点击。
+    """
+    if taps <= 3:
+        return "tap"
+    if taps == 4:
+        return "recover"
+    return "stop"
+
+
+def reward_allowed(act, now, last_gain_t):
+    """「领取奖励」准入校验：排除非奖励页 + 拦截同一弹窗的重复点击。
+
+    实机 BUG（2026-11-14）：奖励弹窗残留 / 直播间绿块被当成「领取奖励」
+    反复点击，5~6s 就虚假计一轮，并把 last_gain_t、live_total、novideo_total
+    全部刷新清零，导致所有「2 分钟无新奖励」停机条件永不成立，
+    形成「领奖 → 进直播间 → 点 X → 又领奖」的无限循环。
+    """
+    if any(k in act for k in ("LivePlayer", "AdActivity", "ConfirmStartActivity")):
+        return False, "非奖励页:%s" % act.split(".")[-1][:28]
+    gap = now - last_gain_t
+    if gap < MIN_REWARD_GAP:
+        return False, "距上次领取%.1fs<%gs(同一弹窗重复)" % (gap, MIN_REWARD_GAP)
+    return True, ""
+
+
+def live_exit_pos(items, W, H):
+    """直播间退出确认：只认退出类文字，返回 (坐标, 文字)。
+
+    不能直接复用 decide()：它把「继续观看」排在「退出不看了」前面
+    （用于保住广告奖励），在直播间退出确认弹窗上会误点「继续观看」，
+    于是永远退不出去 —— 这就是「直播间容错失效」的直接原因。
+    """
+    for pos, txt, score in items:
+        if any(k in txt for k in LIVE_EXIT_WORDS):
+            x, y = pos
+            if 0 <= x <= W and 0 <= y <= H:
+                return (x, y), txt
+    return None, ""
+
+
+def live_recover(im):
+    """直播间容错：识别并点掉「退出不看了」推荐弹窗；没找到就交回调用方升级策略。"""
+    items = probe_items(im)
+    if not items:
+        return False
+    pos, why = live_exit_pos(items, CTX["W"], CTX["H"])
+    if not pos:
+        return False
+    log("[live-fix] 退出确认弹窗 -> %s" % why[:24])
+    hit(im, pos, "LIVE:" + why[:12])
+    return True
+
+
 def hit(im, pos, why):
     """统一点击入口：执行点击 + 可选调试标注。"""
     _SEQ[0] += 1
@@ -375,9 +439,13 @@ def main():
     novideo_cnt = 0
     wait_frames = 0
     last_log_t = t0
-    last_gain_t = t0        # 上次真正领到奖励的时刻
-    live_total = 0          # 累计直播间次数（成功领取时清零）
-    novideo_total = 0       # 累计「无新视频」次数（成功领取时清零）
+    last_gain_t = t0        # 上次「通过准入校验」的真实领取时刻
+    live_total = 0          # 全程累计直播间次数（不再清零）
+    live_streak = 0         # 连续进直播间次数：只在看到真实广告倒计时时清零
+    repeat_streak = 0       # 连续被准入校验拦下的绿块次数
+    ling_taps = 0           # 连续点「领时长」却没进入广告页的次数
+    stop_reason = ""        # 停机原因，写进最终日志与 stats.json
+    novideo_total = 0       # 累计「无新视频」次数（真实领取时清零）
 
     while time.time() - t0 < args.max_seconds:
         if ads >= args.max_ads:
@@ -389,20 +457,29 @@ def main():
         # --- 直播间：右上角 X 退出；连续退不掉就交给 OCR 找「退出不看了」
         if "LivePlayer" in act:
             live_total += 1
-            log("[live] 直播间 -> X (累计 %d)" % live_total)
+            live_streak += 1
+            log("[live] 直播间 (连续 %d / 累计 %d)" % (live_streak, live_total))
             im_live = shot_fast()
-            if other_cnt >= 2 and smart_recover(im_live, "直播间兜底"):
+
+            # 容错分级：点 X -> 处理「退出不看了」弹窗 -> 返回键 -> 拉回福利页断链。
+            # 旧版只在 other_cnt >= 2 时才调兜底，但 other_cnt 每回到主流程
+            # 就被重置为 0，兜底几乎不生效，于是无限「点 X -> 又进直播间」。
+            if live_streak >= 2 and live_recover(im_live):
                 pass
+            elif live_streak >= 5:
+                log("[live] X 与退出弹窗均无效，强制拉回福利页断链")
+                rb(["shell", "am", "start", "-n", CTX["MAIN"]])
+            elif live_streak >= 3:
+                log("[live] X 无效，改用返回键")
+                rb(["shell", "input", "keyevent", "4"])
             else:
                 hit(im_live, CTX["LIVE_X"], "直播间 X")
-            other_cnt += 1
-            # 广告池空时 SDK 会反复把用户导流进直播间，逐次点 X 只会无限循环；
-            # 累计多次且长时间没有新奖励，判定广告池耗尽，主动停机。
-            if other_cnt > 10 or (live_total >= 12 and time.time() - last_gain_t > 120):
-                log("==== 广告池疑似耗尽（反复进直播间、%ds 无新奖励），停止 ===="
+
+            if live_streak >= LIVE_STREAK_LIMIT and time.time() - last_gain_t > 120:
+                log("==== 反复进直播间且 %ds 无真实奖励，停止 ===="
                     % int(time.time() - last_gain_t))
                 break
-            time.sleep(0.5)
+            time.sleep(0.6 if live_streak < 5 else 1.2)
             continue
 
         if "AdActivity" in act:
@@ -446,6 +523,18 @@ def main():
 
         # 1) 奖励弹窗「领取奖励」-> 点质心，计入一轮，自动进入下一广告
         if rew_n > 900 and rew_c:
+            ok, why = reward_allowed(act, time.time(), last_gain_t)
+            if not ok:
+                # 不点、不计数、不刷新 last_gain_t：虚假领奖曾把全部停机计时器清零
+                repeat_streak += 1
+                log("[guard] 绿块不是新奖励：%s (连续 %d)" % (why, repeat_streak))
+                if repeat_streak >= 3:
+                    log("[guard] 连续重复，拉回福利页断链")
+                    rb(["shell", "am", "start", "-n", CTX["MAIN"]])
+                    repeat_streak = 0
+                time.sleep(0.5)
+                continue
+            repeat_streak = 0
             hit(im, rew_c, "领取奖励")
             ads += 1
             capsule_streak = 0
@@ -453,7 +542,6 @@ def main():
             novideo_cnt = 0
             wait_frames = 0
             last_gain_t = time.time()
-            live_total = 0
             novideo_total = 0
             log("==== 第 %d 轮已领取 (%ds) ====" % (ads, int(time.time() - t0)))
             write_stats(ads, True, "第%d轮已领取" % ads)
@@ -466,6 +554,7 @@ def main():
 
         # 2) 广告页
         if "ExcitingVideo" in act:
+            ling_taps = 0        # 成功进入广告页，连点计数归零
             # 「当前无新视频」遮罩：关掉提示层后广告会重新拉取
             ov_white, ov_bright = overlay_stats(im)
             if ov_white > 130 and ov_bright < 90:
@@ -488,6 +577,7 @@ def main():
 
             if pill_n > 20:
                 capsule_streak = 0
+                live_streak = 0      # 看到 App 强制倒计时 = 广告链路已恢复正常
                 wait_frames += 1
                 # 倒计时是 App 端固定走的，这里跑 OCR 不增加墙钟时间；
                 # 每 5 帧（~2s）扫一次「取消」，覆盖直播广告 5 秒窗口。
@@ -525,10 +615,21 @@ def main():
         # 3) App 主页：福利页「领时长 / 继续领」
         if "MainActivity" in act:
             if ling_n > 600 and ling_c:
-                no_progress = 0
-                hit(im, ling_c, "领时长")
-                time.sleep(0.5)
-                continue
+                ling_taps += 1
+                decision = ling_tap_action(ling_taps)
+                if decision == "tap":
+                    hit(im, ling_c, "领时长")
+                    time.sleep(0.6)
+                    continue
+                if decision == "recover":
+                    # 可能被遮罩/提示弹窗挡住，让文字决策表处理一次
+                    if smart_recover(im, "领时长连点兜底"):
+                        ling_taps = 0
+                        time.sleep(0.5)
+                        continue
+                stop_reason = "广告池耗尽：连点%d次「领时长」仍未进入广告页" % ling_taps
+                log("==== %s，停止 ====" % stop_reason)
+                break
             if "MainActivity" not in focus():
                 time.sleep(0.4)
                 continue
@@ -554,8 +655,9 @@ def main():
 
         time.sleep(0.5)
 
-    log("==== 结束：共领取 %d 轮，用时 %ds ====" % (ads, int(time.time() - t0)))
-    write_stats(ads, False, "结束：共%d轮" % ads)
+    log("==== 结束：共领取 %d 轮，用时 %ds | %s ===="
+        % (ads, int(time.time() - t0), stop_reason or "达到硬上限/正常结束"))
+    write_stats(ads, False, stop_reason or ("结束：共%d轮" % ads))
     return 0
 
 

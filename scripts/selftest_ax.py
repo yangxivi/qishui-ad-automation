@@ -109,4 +109,30 @@ finally:
     ax_engine.AXSnapshot.capture = orig_capture
     af.ocr_items = orig_ocr
 
+# 10) & 11) 实机死循环回归：领奖准入 + 直播间退出确认（2026-11-14）
+from automate_fast import reward_allowed, live_exit_pos, MIN_REWARD_GAP  # noqa: E402
+
+NOW = 1000.0
+EXC = "com.ss.android.excitingvideo.ExcitingVideoActivity"
+LIVE = "com.luna.biz.live.LunaDefaultLivePlayerActivity"
+assert reward_allowed(EXC, NOW, NOW - 25)[0] is True
+assert reward_allowed(EXC, NOW, NOW - 5)[0] is False, "5s 内的重复绿块必须拦下"
+assert reward_allowed(LIVE, NOW, NOW - 25)[0] is False, "直播间不能计入奖励"
+assert MIN_REWARD_GAP >= 10
+print("[10] 领奖准入：真实间隔放行 / 5s 重复拦截 / 直播间拦截 OK")
+
+live_items = [((100, 200), "继续观看", 1.0), ((600, 1800), "退出不看了", 1.0)]
+pos_live, txt_live = live_exit_pos(live_items, 1220, 2712)
+assert pos_live == (600, 1800) and "不看了" in txt_live, (pos_live, txt_live)
+assert live_exit_pos([((100, 200), "继续观看", 1.0)], 1220, 2712)[0] is None
+assert live_exit_pos([((5000, 100), "退出不看了", 1.0)], 1220, 2712)[0] is None
+print("[11] 直播间容错：只点退出确认，不误点继续观看 / 越界坐标 OK")
+
+# 12) 福利页连点「领时长」保护：广告池耗尽时必须停机（第二个实机死循环）
+from automate_fast import ling_tap_action, LING_TAP_LIMIT  # noqa: E402
+assert [ling_tap_action(i) for i in range(1, 7)] == [
+    "tap", "tap", "tap", "recover", "stop", "stop"]
+assert LING_TAP_LIMIT == 5
+print("[12] 领时长连点：3 次点击 -> 文字兜底 -> 停机 OK")
+
 print("ALL SELFTESTS PASSED")
