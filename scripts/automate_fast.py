@@ -151,6 +151,35 @@ def ocr_items(im, width=960):
         return []
 
 
+def probe_items(im, width=960):
+    """统一观察入口：按 --engine 返回 [((x,y), text, score), ...]。
+
+    ax / auto -> 先读安卓无障碍树（不截图、不启动 OCR 进程）；
+    auto      -> 树读不到时回退 OCR；
+    ax        -> 绝不启动 OCR（纯无障碍树 / 零截图模式）；
+    ocr       -> 保持原来的逐帧 OCR 行为。
+
+    这里移植的是 vercel-labs/agent-desktop 的 observe 思路（读 OS 无障碍树、
+    每个元素带 ref），只是把桌面 AX/UIAutomation/AT-SPI 换成安卓的
+    uiautomator dump —— 该 CLI 本身不支持 Android，无法直接调用。
+    """
+    engine = CTX.get("engine", "auto")
+    if engine in ("ax", "auto"):
+        try:
+            from ax_engine import AXSnapshot
+            snap = AXSnapshot.capture(log=lambda *a: None)
+            if snap is not None:
+                CTX["ax_nodes"] = len(snap.elements)
+                return snap.items()
+        except Exception as e:
+            log("[ax] 不可用:", str(e)[:100])
+    if engine == "ax":
+        return []
+    if im is None:
+        return []
+    return ocr_items(im, width)
+
+
 def hit(im, pos, why):
     """统一点击入口：执行点击 + 可选调试标注。"""
     _SEQ[0] += 1
@@ -202,9 +231,7 @@ def urgent_recover(im):
     不走 decide() 的优先级，因为倒计时文案「39秒后可领取奖励」会先命中 wait，
     把「取消」挡掉；这里只找有时限的关键词，命中立刻点。
     """
-    if im is None:
-        return False
-    for pos, txt, score in ocr_items(im):
+    for pos, txt, score in probe_items(im):
         if any(b in txt for b in ("了解更多", "立即投保", "前往微保", "向上滑动")):
             continue
         if ("取消" in txt) or ("继续观看" in txt) or ("不看了" in txt):
@@ -215,19 +242,17 @@ def urgent_recover(im):
 
 
 def smart_recover(im, tag):
-    """像素状态机卡住时：OCR 读文字 -> decide() 查表 -> 直接点，不做推理。"""
-    if im is None:
-        return False
-    items = ocr_items(im)
+    """像素状态机卡住时：无障碍树(优先)/OCR 读文字 -> decide() 查表直接点。"""
+    items = probe_items(im)
     if not items:
         return False
     try:
         from automate_ocr import decide
     except Exception as e:
-        log("[ocr-fix] 决策表不可用:", str(e)[:100])
+        log("[fix] 决策表不可用:", str(e)[:100])
         return False
     action, pos, why = decide(items, CTX["W"], CTX["H"])
-    log("[ocr-fix] %s -> %s / %s" % (tag, action, why))
+    log("[fix] %s -> %s / %s (%d 个文字节点)" % (tag, action, why, len(items)))
     if action in ("wait", "none"):
         return False
     if action == "novideo":
@@ -293,7 +318,10 @@ def main():
     ap.add_argument("--max-seconds", type=int, default=3600, help="总运行时长上限（秒）")
     ap.add_argument("--ocr-every", type=int, default=10, help="每 N 轮 OCR 抽查一次")
     ap.add_argument("--target-day", type=int, default=31, help="目标天数（日志/统计标注）")
-    ap.add_argument("--debug", action="store_true", help="保存带 OCR 标注与点击位置的截图")
+    ap.add_argument("--debug", action="store_true", help="保存带文字标注与点击位置的截图")
+    ap.add_argument("--engine", choices=["ax", "ocr", "auto"], default="auto",
+                    help="定位引擎：ax=纯无障碍树(零OCR) / ocr=原OCR / "
+                         "auto=无障碍树优先、OCR兜底（默认）")
     args = ap.parse_args()
 
     devs = rb(["devices"]).stdout.decode(errors="replace")
@@ -319,7 +347,8 @@ def main():
     LING_BOX = R(0.75, 0.34, 0.97, 0.42)
 
     CTX.update(
-        W=W, H=H, debug=args.debug, target_day=args.target_day, max_ads=args.max_ads,
+        W=W, H=H, debug=args.debug, engine=args.engine,
+        target_day=args.target_day, max_ads=args.max_ads,
         started=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t0=time.time(),
         MAIN="com.luna.music/com.luna.biz.main.main.MainActivity",
         LIVE_X=(int(W * 0.945), int(H * 0.072)),
@@ -329,8 +358,9 @@ def main():
         NO_VIDEO_X=(int(W * 0.92), int(H * 0.034)),
     )
 
-    log("==== 极速 v2 启动 %dx%d | 上限 %d 轮 / %ds | OCR 抽查每 %d 轮 | 目标 %d 天 | debug=%s ===="
-        % (W, H, args.max_ads, args.max_seconds, args.ocr_every, args.target_day, args.debug))
+    log("==== 极速 v2 启动 %dx%d | engine=%s | 上限 %d 轮 / %ds | 抽查每 %d 轮 | 目标 %d 天 | debug=%s ===="
+        % (W, H, args.engine, args.max_ads, args.max_seconds,
+           args.ocr_every, args.target_day, args.debug))
     write_stats(0, True, "启动")
 
     if not ensure_welfare(LING_BOX):
@@ -428,8 +458,8 @@ def main():
             log("==== 第 %d 轮已领取 (%ds) ====" % (ads, int(time.time() - t0)))
             write_stats(ads, True, "第%d轮已领取" % ads)
             if args.ocr_every and ads % args.ocr_every == 0:
-                ocr_items(im)
-                log("[ocr-check] 第%d轮抽查完成" % ads)
+                its = probe_items(im)
+                log("[check] 第%d轮抽查完成，%d 个文字节点" % (ads, len(its)))
             time.sleep(0.45)
             last_log_t = time.time()
             continue
@@ -480,8 +510,9 @@ def main():
                     time.sleep(0.5)
                     continue
             if capsule_streak > 12:
-                log("!! 胶囊连点无响应，做一次 OCR 诊断")
-                ocr_items(im)
+                log("!! 胶囊连点无响应，做一次文字诊断")
+                its = probe_items(im)
+                log("[diag] 可见文字: %s" % [t for _, t, _ in its][:12])
                 capsule_streak = 0
                 no_progress += 1
                 if no_progress > 3:

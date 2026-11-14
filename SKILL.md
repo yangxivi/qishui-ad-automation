@@ -53,10 +53,14 @@ python scripts/automate_fast.py --max-ads 120 --max-seconds 3600 --target-day 31
 
 - 必带 `--max-ads` / `--max-seconds` 硬上限，禁止无限挂机
 - 日志 `scripts/automate_fast.log`；统计 `scripts/stats.json`（每轮更新）
-- 只在三种情况才需额外动作：设备未连接/未授权、像素与 OCR 兜底都失效、日志明确报错
+- **默认已改为无障碍树优先**：`--engine auto`（默认）先读 `uiautomator` 树，读不到才用 OCR；
+  `--engine ax` 纯无障碍树、全程零 OCR；`--engine ocr` 回到旧版逐帧 OCR。见下方专节
+- 只在三种情况才需额外动作：设备未连接/未授权、像素 / 无障碍树 / OCR 三层兜底都失效、日志明确报错
 - 图形界面：`python scripts/gui.py` → 本地网页控制面板（自动开浏览器 `127.0.0.1:8765`），
   可视化配置参数 + 实时日志 + 统计；仅用标准库 `http.server`，不依赖 tkinter
-- 调试排查：加 `--debug`，点击时保存带 OCR 文字框与点击位置的标注截图到 `scripts/debug/`
+- 调试排查：加 `--debug`，点击时保存带文字框与点击位置的标注截图到 `scripts/debug/`
+- **Python 环境**：主程序需要 Pillow。本机 Bash 的 `python` 是 WorkBuddy 自带 3.13，
+  系统 `python` 是 3.14；两者都已装 Pillow 13.0.0，任选其一即可
 
 **诚实性要求（不可省略，与「少推理」不冲突）**：
 - 只报真实发生的结果；失败、没领到、半途停止都要直说，不得用「启动成功」冒充「领取成功」
@@ -100,19 +104,54 @@ python scripts/automate_fast.py --max-ads 120 --max-seconds 3600 --target-day 31
 | `--max-seconds` | 3600 | 总时长硬上限（秒） |
 | `--ocr-every` | 10 | 每 N 轮做一次 OCR 链路抽查 |
 | `--target-day` | 31 | 目标天数（日志/统计标注） |
-| `--debug` | 关 | 保存带 OCR 标注与点击位置的调试截图 |
+| `--debug` | 关 | 保存带文字标注与点击位置的调试截图 |
+| `--engine` | `auto` | 定位引擎：`ax` 纯无障碍树（零 OCR）/ `ocr` 原 OCR / `auto` 树优先、OCR 兜底 |
 
 另有 `automate_ocr.py`（逐帧 OCR 版，`--dry-run` 只打印决策不点屏幕）与
 `automate_fixed.py`（纯像素状态机）作为对照与回退。
+
+## 无障碍树引擎（替代 OCR 图片识别）
+
+思路来自 [vercel-labs/agent-desktop](https://github.com/vercel-labs/agent-desktop)：
+读 OS 无障碍树 → 每个元素带 ref → 按 ref 点击 → 再读一次树验证（observe / act / verify），
+不靠截图与像素匹配。
+
+**重要**：该 CLI 只支持 macOS（AX API）/ Windows（UI Automation）/ Linux（AT-SPI）的**桌面应用**，
+不支持 Android 与 adb，仓库 `skills/` 下也只有 desktop/macos/windows/linux/ffi。
+汽水音乐跑在手机上，因此**无法直接调用它**；`scripts/ax_engine.py` 是把同一套机制
+落到安卓侧 —— `adb shell uiautomator dump` 就是安卓的无障碍树快照。
+
+- `AXSnapshot.capture()` → observe，snapshot_id 为 XML 内容哈希，UI 变化即变化
+- 每个节点生成 `@ax<snapshot_id>:eN` 的 ref，含 text / content-desc / resource-id / bounds
+- `snap.items()` 把节点中心转成 `decide()` 同构数据，**直接复用原关键词决策表与黑名单**，
+  倒计时优先、广告主 CTA 永不点击等规则完全不变
+- `snap.click_ref()` 按 ref 点 bounds 中心；旧 ref 抛 `StaleRef`（对应 agent-desktop 的 `STALE_REF`）
+- `snap.verify()` 重新 observe，比较 snapshot_id 判断动作是否生效
+
+| `--engine` | 观察方式 | 是否启动 OCR |
+|---|---|---|
+| `ax` | 仅 `uiautomator` 树 | **否** |
+| `auto`（默认） | 树优先，读不到再 OCR | 仅兜底时 |
+| `ocr` | 逐帧 OCR | 是 |
+
+**已知限制（真机未验证）**：激励视频广告页若由 WebView / 自绘控件渲染，
+无障碍树里可能没有可点文字节点。此时 `auto` 自动回退 OCR，`ax` 不猜测、不盲点，
+靠 `--max-seconds` / `--max-ads` 硬上限停机。像素快路径（绿色按钮质心）仍保留，
+它不依赖 OCR。首次上真机建议先 `--engine auto --debug` 观察一轮再决定是否切 `ax`。
+
+若确实要在 PC 上用 agent-desktop 操作桌面应用，另行安装
+`npm i -g agent-desktop` 并运行 `agent-desktop skills get desktop`；与安卓链路无关。
 
 ## 文件
 
 | 文件 | 说明 |
 |---|---|
+| `scripts/ax_engine.py` | **无障碍树后端**（替代 OCR）：快照 / ref / 点击 / 复验 |
+| `scripts/selftest_ax.py` | 离线回归自测：`python scripts/selftest_ax.py`，不需要手机 |
 | `scripts/setup_ocr.py` | 一次性安装/校验轻量 OCR 引擎 |
-| `scripts/ocr_engine.py` | 统一 OCR 后端（winrt → rapidocr → 无） |
+| `scripts/ocr_engine.py` | 统一 OCR 后端（winrt → rapidocr → 无；仅 `ocr` 模式或 `auto` 兜底时用） |
 | `scripts/win_ocr.ps1` | Windows 内置 OCR 调用封装 |
-| `scripts/automate_fast.py` | **主程序**：极速 v2，像素快路径 + OCR 兜底 |
+| `scripts/automate_fast.py` | **主程序**：极速 v2，像素快路径 + 无障碍树/OCR 兜底 |
 | `scripts/automate_ocr.py` | 逐帧 OCR 决策表（含 `decide()`，被主程序复用） |
 | `scripts/automate_fixed.py` | 像素状态机工具函数（`rb`/`focus`/`green_stats`/`tap`） |
 | `scripts/gui.py` | 本地网页控制面板（标准库 `http.server`，零依赖、无需 tkinter） |
